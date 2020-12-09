@@ -20,14 +20,16 @@ type SeaweedFSLogDriver struct {
 	prefix           string // directory prefix, default: "test"
 	size             int64  // number of lines per log chunk file, default: 1000
 	padding          int64  // log file name padding, default: 8
-	flushWaitSeconds int64  // wait time to flush buffer
+	flushWaitSeconds int64  // wait time to flush buffer, default: 3
 
 	// internals
-	count         int64                // internal count of lines logged
-	buffer        bytes.Buffer         // buffer of log lines written
-	m             *fs.SeaweedFSManager // SeaweedFSManager instance
-	lock          sync.Mutex
-	readyForFlush bool
+	count     int64                // internal count of lines logged
+	buffer    bytes.Buffer         // buffer of log lines written
+	m         *fs.SeaweedFSManager // SeaweedFSManager instance
+	writeLock *sync.Mutex          // write lock
+	flushLock *sync.Mutex          // flush lock
+	ch        chan string          // channel
+	flushing  bool                 // whether the log driver is flushing
 }
 
 func NewSeaweedFSLogDriver(prefix string) (driver *SeaweedFSLogDriver, err error) {
@@ -57,7 +59,7 @@ func NewSeaweedFSLogDriver(prefix string) (driver *SeaweedFSLogDriver, err error
 	}
 	flushWaitSeconds := viper.GetInt64("log.seaweedfs.flushWaitSeconds")
 	if flushWaitSeconds == 0 {
-		flushWaitSeconds = 5
+		flushWaitSeconds = 3
 	}
 	manager, err := fs.NewSeaweedFSManager()
 	if err != nil {
@@ -71,7 +73,10 @@ func NewSeaweedFSLogDriver(prefix string) (driver *SeaweedFSLogDriver, err error
 		flushWaitSeconds: flushWaitSeconds,
 		count:            0,
 		m:                manager,
-		readyForFlush:    false,
+		writeLock:        &sync.Mutex{},
+		flushLock:        &sync.Mutex{},
+		ch:               make(chan string),
+		flushing:         false,
 	}
 	if err := driver.Init(); err != nil {
 		return driver, err
@@ -80,6 +85,22 @@ func NewSeaweedFSLogDriver(prefix string) (driver *SeaweedFSLogDriver, err error
 }
 
 func (d *SeaweedFSLogDriver) Init() (err error) {
+	// flush handler
+	go func() {
+		for {
+			select {
+			case v := <-d.ch:
+				if v == SignalFlush && !d.flushing {
+					d.flushLock.Lock()
+					d.flushing = true
+					time.Sleep(time.Duration(d.flushWaitSeconds) * time.Second)
+					_ = d.Flush()
+					d.flushing = false
+					d.flushLock.Unlock()
+				}
+			}
+		}
+	}()
 	return nil
 }
 
@@ -91,35 +112,24 @@ func (d *SeaweedFSLogDriver) Close() (err error) {
 }
 
 func (d *SeaweedFSLogDriver) Write(line string) (err error) {
-	d.lock.Lock()
+	// lock
+	d.writeLock.Lock()
 
 	// write log line to buffer
-	_, err = d.buffer.WriteString(line)
+	_, err = d.buffer.WriteString(line + "\n")
+	//fmt.Println(fmt.Sprintf("written: %s", line))
 	if err != nil {
 		return err
 	}
 	d.count++
 
-	if d.readyForFlush {
-		// if ready for flush, make a goroutine to flush buffer n seconds later
-		d.readyForFlush = false
-		chErr := make(chan error)
-		go func() {
-			// wait for a period of time before flushing
-			time.Sleep(time.Duration(d.flushWaitSeconds) * time.Second)
+	// send flush signal
+	go func() {
+		d.ch <- SignalFlush
+	}()
 
-			// flush buffer
-			if err := d.Flush(); err != nil {
-				chErr <- err
-			}
-		}()
-		err = <-chErr // blocking
-		if err != nil {
-			return err
-		}
-	}
-
-	d.lock.Unlock()
+	// unlock
+	d.writeLock.Unlock()
 
 	return nil
 }
@@ -141,32 +151,110 @@ func (d *SeaweedFSLogDriver) Count(pattern string) (count int, err error) {
 	return count, nil
 }
 
-func (d *SeaweedFSLogDriver) GetCurrentLogFilePath() (filePath string) {
-	page := d.count / d.size
+func (d *SeaweedFSLogDriver) GetLastLogFilePage() (page int64, err error) {
+	ok, err := d.m.Exists(fmt.Sprintf("/%s/%s", d.baseDir, d.prefix))
+	if err != nil {
+		return page, err
+	}
+	if !ok {
+		return 0, nil
+	}
+
+	files, err := d.m.ListDir(fmt.Sprintf("/%s/%s", d.baseDir, d.prefix))
+	if err != nil {
+		return page, err
+	}
+	lastFile := files[len(files)-1]
+	page, err = strconv.ParseInt(lastFile.Name, 10, 64)
+	if err != nil {
+		return page, err
+	}
+	return
+}
+
+func (d *SeaweedFSLogDriver) GetLastFilePath() (filePath string, err error) {
+	page, err := d.GetLastLogFilePage()
+	if err != nil {
+		return filePath, err
+	}
+	filePath = d.GetFilePathByPage(page)
+	return
+}
+
+func (d *SeaweedFSLogDriver) GetFilePathByPage(page int64) (filePath string) {
 	fileName := fmt.Sprintf("%0"+strconv.FormatInt(d.padding, 10)+"d", page)
 	filePath = fmt.Sprintf("/%s/%s/%s", d.baseDir, d.prefix, fileName)
 	return
 }
 
-func (d *SeaweedFSLogDriver) IsReadyForFlush() (ok bool, err error) {
-	return
-}
-
 func (d *SeaweedFSLogDriver) Flush() (err error) {
-	// remote file path
-	filePath := d.GetCurrentLogFilePath()
+	// skip if no data in buffer
+	if d.buffer.Len() == 0 {
+		return nil
+	}
 
-	// check whether it exists
+	// get remote file path
+	filePath, err := d.GetLastFilePath()
+	if err != nil {
+		return err
+	}
+
+	// check if it exists
 	ok, err := d.m.Exists(filePath)
 	if err != nil {
 		return err
 	}
 
-	if !ok {
-		// not exists
+	// update log files
+	i := int64(0)
+	text := ""
+	if ok {
+		data, err := d.m.GetFile(filePath)
+		if err != nil {
+			return err
+		}
+		text = string(data)
+		for _, line := range strings.Split(string(data), "\n") {
+			if line == "" {
+				continue
+			}
+			text += line + "\n"
+			i++
+		}
+	}
+	for _, line := range strings.Split(d.buffer.String(), "\n") {
+		if line == "" {
+			continue
+		}
+		text += line + "\n"
+		i++
+		if (i % d.size) == 0 {
+			page, err := d.GetLastLogFilePage()
+			if err != nil {
+				return err
+			}
+			page += i/d.size - 1
+			filePath = d.GetFilePathByPage(page)
+			if err := d.m.UpdateFile(filePath, []byte(text)); err != nil {
+				return err
+			}
+			text = ""
+		}
+	}
+	if text != "" {
+		page, err := d.GetLastLogFilePage()
+		if err != nil {
+			return err
+		}
+		page += i / d.size
+		filePath = d.GetFilePathByPage(page)
+		if err := d.m.UpdateFile(filePath, []byte(text)); err != nil {
+			return err
+		}
 	}
 
-	// reset count
-	d.count = 0
+	// reset buffer
+	d.buffer.Reset()
+
 	return nil
 }
