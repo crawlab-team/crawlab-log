@@ -238,7 +238,7 @@ func (d *SeaweedFSLogDriver) GetFilePathsFromSkipAndLimit(skip, limit int) (file
 }
 
 func (d *SeaweedFSLogDriver) GetLogFiles() (files []goseaweedfs.FilerFileInfo, err error) {
-	_files, err := d.m.ListDir(fmt.Sprintf("/%s/%s", d.baseDir, d.prefix))
+	_files, err := d.m.ListDir(fmt.Sprintf("/%s/%s", d.baseDir, d.prefix), false)
 	if err != nil {
 		return files, err
 	}
