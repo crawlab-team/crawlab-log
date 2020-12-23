@@ -8,20 +8,26 @@ import (
 )
 
 func setup(driver *SeaweedFSLogDriver) {
-	_ = driver.m.DeleteDir("/logs/" + driver.prefix)
+	_ = driver.m.DeleteDir(fmt.Sprintf("/%s/%s", driver.opts.BaseDir, driver.opts.Prefix))
 }
 
 func cleanup(driver *SeaweedFSLogDriver) {
-	_ = driver.m.DeleteDir("/logs/" + driver.prefix)
+	_ = driver.m.DeleteDir(fmt.Sprintf("/%s/%s", driver.opts.BaseDir, driver.opts.Prefix))
 }
 
 func TestNewSeaweedFSDriver(t *testing.T) {
-	_, err := NewSeaweedFSLogDriver("test")
+	_, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+		BaseDir: "logs",
+		Prefix:  "test",
+	})
 	require.Nil(t, err)
 }
 
 func TestSeaweedFSLogDriver_Write(t *testing.T) {
-	driver, err := NewSeaweedFSLogDriver("test")
+	driver, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+		BaseDir: "logs",
+		Prefix:  "test",
+	})
 	require.Nil(t, err)
 
 	setup(driver)
@@ -77,7 +83,10 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
-	driver, err := NewSeaweedFSLogDriver("test")
+	driver, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+		BaseDir: "logs",
+		Prefix:  "test",
+	})
 	require.Nil(t, err)
 
 	setup(driver)
@@ -105,7 +114,10 @@ func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_Find(t *testing.T) {
-	driver, err := NewSeaweedFSLogDriver("test")
+	driver, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+		BaseDir: "logs",
+		Prefix:  "test",
+	})
 	require.Nil(t, err)
 
 	setup(driver)

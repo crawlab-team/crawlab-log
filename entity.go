@@ -9,6 +9,7 @@ type Message struct {
 }
 
 type Metadata struct {
-	Size       int64 `json:"size" bson:"size"`
-	TotalBytes int64 `json:"total_bytes" bson:"total_bytes"`
+	Size       int64  `json:"size" bson:"size"`
+	TotalBytes int64  `json:"total_bytes" bson:"total_bytes"`
+	Md5        string `json:"md5" bson:"md5"`
 }
