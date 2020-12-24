@@ -101,7 +101,6 @@ func NewSeaweedFSLogDriver(options *SeaweedFSLogDriverOptions) (driver *SeaweedF
 		writeLock: &sync.Mutex{},
 		flushLock: &sync.Mutex{},
 		ch:        make(chan string),
-		flushing:  false,
 	}
 
 	// init driver
@@ -116,17 +115,10 @@ func (d *SeaweedFSLogDriver) Init() (err error) {
 	// flush handler
 	go func() {
 		for {
-			select {
-			case v := <-d.ch:
-				if v == SignalFlush && !d.flushing {
-					d.flushLock.Lock()
-					d.flushing = true
-					time.Sleep(time.Duration(d.opts.FlushWaitSeconds) * time.Second)
-					_ = d.Flush()
-					d.flushing = false
-					d.flushLock.Unlock()
-				}
-			}
+			d.flushLock.Lock()
+			_ = d.Flush()
+			d.flushLock.Unlock()
+			time.Sleep(time.Duration(d.opts.FlushWaitSeconds) * time.Second)
 		}
 	}()
 	return nil
@@ -145,16 +137,11 @@ func (d *SeaweedFSLogDriver) Write(line string) (err error) {
 
 	// write log line to buffer
 	_, err = d.buffer.WriteString(line + "\n")
-	//fmt.Println(fmt.Sprintf("written: %s", line))
+	fmt.Println(fmt.Sprintf("written: %s", line))
 	if err != nil {
 		return err
 	}
 	d.count++
-
-	// send flush signal
-	go func() {
-		d.ch <- SignalFlush
-	}()
 
 	// unlock
 	d.writeLock.Unlock()
@@ -310,6 +297,7 @@ func (d *SeaweedFSLogDriver) Flush() (err error) {
 	if d.buffer.Len() == 0 {
 		return nil
 	}
+	fmt.Println(fmt.Sprintf("flushing: %d lines", len(strings.Split(d.buffer.String(), "\n"))))
 
 	// get remote file path
 	filePath, err := d.GetLastFilePath()
