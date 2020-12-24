@@ -137,7 +137,7 @@ func (d *SeaweedFSLogDriver) Write(line string) (err error) {
 
 	// write log line to buffer
 	_, err = d.buffer.WriteString(line + "\n")
-	fmt.Println(fmt.Sprintf("written: %s", line))
+	//fmt.Println(fmt.Sprintf("written: %s", line))
 	if err != nil {
 		return err
 	}
@@ -297,7 +297,7 @@ func (d *SeaweedFSLogDriver) Flush() (err error) {
 	if d.buffer.Len() == 0 {
 		return nil
 	}
-	fmt.Println(fmt.Sprintf("flushing: %d lines", len(strings.Split(d.buffer.String(), "\n"))))
+	//fmt.Println(fmt.Sprintf("flushing: %d lines", len(strings.Split(d.buffer.String(), "\n"))))
 
 	// get remote file path
 	filePath, err := d.GetLastFilePath()
