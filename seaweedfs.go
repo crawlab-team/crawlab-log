@@ -2,6 +2,8 @@ package log
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,7 +133,7 @@ func (d *SeaweedFSLogDriver) Close() (err error) {
 	return nil
 }
 
-func (d *SeaweedFSLogDriver) Write(line string) (err error) {
+func (d *SeaweedFSLogDriver) WriteLine(line string) (err error) {
 	// lock
 	d.writeLock.Lock()
 
@@ -151,7 +153,7 @@ func (d *SeaweedFSLogDriver) Write(line string) (err error) {
 
 func (d *SeaweedFSLogDriver) WriteLines(lines []string) (err error) {
 	for _, line := range lines {
-		if err := d.Write(line); err != nil {
+		if err := d.WriteLine(line); err != nil {
 			return err
 		}
 	}
@@ -266,10 +268,18 @@ func (d *SeaweedFSLogDriver) UpdateMetadata() (err error) {
 	files, err := d.GetLogFiles()
 	for _, file := range files {
 		totalBytes += file.FileSize
+		if err != nil {
+			return err
+		}
+	}
+	md5sum, err := d.getMd5(files)
+	if err != nil {
+		return err
 	}
 	metadata := Metadata{
 		Size:       d.opts.Size,
 		TotalBytes: totalBytes,
+		Md5:        md5sum,
 	}
 	metadataBytes, err := json.Marshal(&metadata)
 	if err != nil {
@@ -292,12 +302,25 @@ func (d *SeaweedFSLogDriver) GetMetadata() (metadata Metadata, err error) {
 	return
 }
 
+func (d *SeaweedFSLogDriver) getMd5(files []goseaweedfs.FilerFileInfo) (md5sum string, err error) {
+	h := md5.New()
+	for _, file := range files {
+		data, err := d.m.GetFile(file.FullPath)
+		if err != nil {
+			return md5sum, err
+		}
+		h.Write(data)
+	}
+	md5sum = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	return md5sum, nil
+}
+
 func (d *SeaweedFSLogDriver) Flush() (err error) {
 	// skip if no data in buffer
 	if d.buffer.Len() == 0 {
 		return nil
 	}
-	//fmt.Println(fmt.Sprintf("flushing: %d lines", len(strings.Split(d.buffer.String(), "\n"))))
+	//fmt.Println(fmt.Sprintf("flushing: %d lines", len(strings.Split(d.buffer.String(), "\n"))-1))
 
 	// get remote file path
 	filePath, err := d.GetLastFilePath()
@@ -320,7 +343,6 @@ func (d *SeaweedFSLogDriver) Flush() (err error) {
 		if err != nil {
 			return err
 		}
-		text = string(data)
 
 		// lines count of last file
 		dataLines := strings.Split(string(data), "\n")
@@ -356,6 +378,7 @@ func (d *SeaweedFSLogDriver) Flush() (err error) {
 				increment = false
 			}
 			filePath = d.GetFilePathByPage(page)
+			fmt.Println(fmt.Sprintf("text: %s", text))
 			if err := d.m.UpdateFile(filePath, []byte(text)); err != nil {
 				return err
 			}
@@ -373,6 +396,7 @@ func (d *SeaweedFSLogDriver) Flush() (err error) {
 			increment = false
 		}
 		filePath = d.GetFilePathByPage(page)
+		//fmt.Println(fmt.Sprintf("text: %s", text))
 		if err := d.m.UpdateFile(filePath, []byte(text)); err != nil {
 			return err
 		}
@@ -386,5 +410,6 @@ func (d *SeaweedFSLogDriver) Flush() (err error) {
 		return err
 	}
 
+	//fmt.Println(fmt.Sprintf("reset buffer: %d lines", len(strings.Split(d.buffer.String(), "\n"))-1))
 	return nil
 }

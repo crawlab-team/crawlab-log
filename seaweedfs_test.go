@@ -36,7 +36,7 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 	content1 := ""
 	for i := 0; i < 10001; i++ {
 		line := fmt.Sprintf("line: %d", i+1)
-		err = driver.Write(line)
+		err = driver.WriteLine(line)
 		require.Nil(t, err)
 		if i < 1000 {
 			content0 += line + "\n"
@@ -69,7 +69,7 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 
 	for i := 10001; i < 20001; i++ {
 		line := fmt.Sprintf("line: %d", i+1)
-		err = driver.Write(line)
+		err = driver.WriteLine(line)
 		require.Nil(t, err)
 	}
 
@@ -178,6 +178,38 @@ func TestSeaweedFSLogDriver_Find(t *testing.T) {
 	require.Equal(t, 2001, len(lines))
 	require.Equal(t, "line: 1000", lines[0])
 	require.Equal(t, "line: 3000", lines[len(lines)-1])
+
+	cleanup(driver)
+}
+
+func TestSeaweedFSLogDriver_GetMetadata(t *testing.T) {
+	driver, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+		BaseDir: "logs",
+		Prefix:  "test",
+		Size:    1000,
+	})
+	require.Nil(t, err)
+
+	setup(driver)
+
+	// write lines
+	batch := 500
+	var lines []string
+	for j := 0; j < batch; j++ {
+		line := fmt.Sprintf("line: %d", j+1)
+		lines = append(lines, line)
+	}
+	err = driver.WriteLines(lines)
+	require.Nil(t, err)
+	err = driver.Flush()
+	require.Nil(t, err)
+
+	// test get metadata
+	data, err := driver.GetMetadata()
+	require.Nil(t, err)
+	require.Equal(t, 1000, int(data.Size))
+	require.Greater(t, int(data.TotalBytes), 0)
+	require.NotEmpty(t, data.Md5)
 
 	cleanup(driver)
 }
