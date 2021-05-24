@@ -8,31 +8,31 @@ import (
 	"errors"
 	"fmt"
 	fs "github.com/crawlab-team/crawlab-fs"
-	"github.com/linxGnu/goseaweedfs"
+	"github.com/crawlab-team/goseaweedfs"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// log driver for seaweedfs
+// SeaweedFsLogDriver log driver for seaweedfs
 // logs will be saved as chunks of files
 // log chunk file remote path example: /<baseDir>/<prefix>/00000001
-type SeaweedFSLogDriver struct {
+type SeaweedFsLogDriver struct {
 	// settings
-	opts *SeaweedFSLogDriverOptions // options
+	opts *SeaweedFsLogDriverOptions // options
 
 	// internals
-	count     int64                // internal count of lines logged
-	buffer    bytes.Buffer         // buffer of log lines written
-	m         *fs.SeaweedFSManager // SeaweedFSManager instance
-	writeLock *sync.Mutex          // write lock
-	flushLock *sync.Mutex          // flush lock
-	ch        chan string          // channel
-	flushing  bool                 // whether the log driver is flushing
+	count     int64        // internal count of lines logged
+	buffer    bytes.Buffer // buffer of log lines written
+	m         fs.Manager   // SeaweedFSManager instance
+	writeLock *sync.Mutex  // write lock
+	flushLock *sync.Mutex  // flush lock
+	ch        chan string  // channel
+	flushing  bool         // whether the log driver is flushing
 }
 
-type SeaweedFSLogDriverOptions struct {
+type SeaweedFsLogDriverOptions struct {
 	BaseDir          string // base directory path for log files, default: "logs"
 	Prefix           string // directory prefix, default: "test"
 	Size             int64  // number of lines per log chunk file, default: 1000
@@ -41,7 +41,7 @@ type SeaweedFSLogDriverOptions struct {
 	MetadataName     string // metadata file name, set to "metadata.json"
 }
 
-func NewSeaweedFSLogDriver(options *SeaweedFSLogDriverOptions) (driver *SeaweedFSLogDriver, err error) {
+func NewSeaweedFsLogDriver(options *SeaweedFsLogDriverOptions) (driver *SeaweedFsLogDriver, err error) {
 	// normalize BaseDir
 	baseDir := options.BaseDir
 	if baseDir == "" {
@@ -90,13 +90,13 @@ func NewSeaweedFSLogDriver(options *SeaweedFSLogDriverOptions) (driver *SeaweedF
 	options.FlushWaitSeconds = flushWaitSeconds
 
 	// fs manager
-	manager, err := fs.NewSeaweedFSManager()
+	manager, err := fs.NewSeaweedFsManager()
 	if err != nil {
 		return driver, err
 	}
 
 	// driver
-	driver = &SeaweedFSLogDriver{
+	driver = &SeaweedFsLogDriver{
 		opts:      options,
 		count:     0,
 		m:         manager,
@@ -113,7 +113,7 @@ func NewSeaweedFSLogDriver(options *SeaweedFSLogDriverOptions) (driver *SeaweedF
 	return
 }
 
-func (d *SeaweedFSLogDriver) Init() (err error) {
+func (d *SeaweedFsLogDriver) Init() (err error) {
 	// flush handler
 	go func() {
 		for {
@@ -126,14 +126,14 @@ func (d *SeaweedFSLogDriver) Init() (err error) {
 	return nil
 }
 
-func (d *SeaweedFSLogDriver) Close() (err error) {
+func (d *SeaweedFsLogDriver) Close() (err error) {
 	if err := d.m.Close(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (d *SeaweedFSLogDriver) WriteLine(line string) (err error) {
+func (d *SeaweedFsLogDriver) WriteLine(line string) (err error) {
 	// lock
 	d.writeLock.Lock()
 
@@ -151,7 +151,7 @@ func (d *SeaweedFSLogDriver) WriteLine(line string) (err error) {
 	return nil
 }
 
-func (d *SeaweedFSLogDriver) WriteLines(lines []string) (err error) {
+func (d *SeaweedFsLogDriver) WriteLines(lines []string) (err error) {
 	for _, line := range lines {
 		if err := d.WriteLine(line); err != nil {
 			return err
@@ -160,7 +160,7 @@ func (d *SeaweedFSLogDriver) WriteLines(lines []string) (err error) {
 	return nil
 }
 
-func (d *SeaweedFSLogDriver) Find(pattern string, skip, limit int) (lines []string, err error) {
+func (d *SeaweedFsLogDriver) Find(pattern string, skip, limit int) (lines []string, err error) {
 	if pattern != "" {
 		// TODO: implement
 		return lines, errors.New("not implemented")
@@ -194,11 +194,11 @@ func (d *SeaweedFSLogDriver) Find(pattern string, skip, limit int) (lines []stri
 	return
 }
 
-func (d *SeaweedFSLogDriver) Count(pattern string) (count int, err error) {
+func (d *SeaweedFsLogDriver) Count(pattern string) (count int, err error) {
 	return count, nil
 }
 
-func (d *SeaweedFSLogDriver) GetLastLogFilePage() (page int64, err error) {
+func (d *SeaweedFsLogDriver) GetLastLogFilePage() (page int64, err error) {
 	ok, err := d.m.Exists(fmt.Sprintf("/%s/%s", d.opts.BaseDir, d.opts.Prefix))
 	if err != nil {
 		return page, err
@@ -220,7 +220,7 @@ func (d *SeaweedFSLogDriver) GetLastLogFilePage() (page int64, err error) {
 	return
 }
 
-func (d *SeaweedFSLogDriver) GetLastFilePath() (filePath string, err error) {
+func (d *SeaweedFsLogDriver) GetLastFilePath() (filePath string, err error) {
 	page, err := d.GetLastLogFilePage()
 	if err != nil {
 		return filePath, err
@@ -229,13 +229,13 @@ func (d *SeaweedFSLogDriver) GetLastFilePath() (filePath string, err error) {
 	return
 }
 
-func (d *SeaweedFSLogDriver) GetFilePathByPage(page int64) (filePath string) {
+func (d *SeaweedFsLogDriver) GetFilePathByPage(page int64) (filePath string) {
 	fileName := fmt.Sprintf("%0"+strconv.FormatInt(d.opts.Padding, 10)+"d", page)
 	filePath = fmt.Sprintf("/%s/%s/%s", d.opts.BaseDir, d.opts.Prefix, fileName)
 	return
 }
 
-func (d *SeaweedFSLogDriver) GetFilePathsFromSkipAndLimit(skip, limit int) (filePaths []string) {
+func (d *SeaweedFsLogDriver) GetFilePathsFromSkipAndLimit(skip, limit int) (filePaths []string) {
 	size := int(d.opts.Size)
 	startPage := skip / size
 	endPage := (skip+limit)/size + 1
@@ -249,7 +249,7 @@ func (d *SeaweedFSLogDriver) GetFilePathsFromSkipAndLimit(skip, limit int) (file
 	return
 }
 
-func (d *SeaweedFSLogDriver) GetLogFiles() (files []goseaweedfs.FilerFileInfo, err error) {
+func (d *SeaweedFsLogDriver) GetLogFiles() (files []goseaweedfs.FilerFileInfo, err error) {
 	_files, err := d.m.ListDir(fmt.Sprintf("/%s/%s", d.opts.BaseDir, d.opts.Prefix), false)
 	if err != nil {
 		return files, err
@@ -263,7 +263,7 @@ func (d *SeaweedFSLogDriver) GetLogFiles() (files []goseaweedfs.FilerFileInfo, e
 	return
 }
 
-func (d *SeaweedFSLogDriver) UpdateMetadata() (err error) {
+func (d *SeaweedFsLogDriver) UpdateMetadata() (err error) {
 	totalBytes := int64(0)
 	files, err := d.GetLogFiles()
 	for _, file := range files {
@@ -291,7 +291,7 @@ func (d *SeaweedFSLogDriver) UpdateMetadata() (err error) {
 	return
 }
 
-func (d *SeaweedFSLogDriver) GetMetadata() (metadata Metadata, err error) {
+func (d *SeaweedFsLogDriver) GetMetadata() (metadata Metadata, err error) {
 	data, err := d.m.GetFile(fmt.Sprintf("/%s/%s/%s", d.opts.BaseDir, d.opts.Prefix, MetadataName))
 	if err != nil {
 		return metadata, err
@@ -302,7 +302,7 @@ func (d *SeaweedFSLogDriver) GetMetadata() (metadata Metadata, err error) {
 	return
 }
 
-func (d *SeaweedFSLogDriver) getMd5(files []goseaweedfs.FilerFileInfo) (md5sum string, err error) {
+func (d *SeaweedFsLogDriver) getMd5(files []goseaweedfs.FilerFileInfo) (md5sum string, err error) {
 	h := md5.New()
 	for _, file := range files {
 		data, err := d.m.GetFile(file.FullPath)
@@ -315,7 +315,7 @@ func (d *SeaweedFSLogDriver) getMd5(files []goseaweedfs.FilerFileInfo) (md5sum s
 	return md5sum, nil
 }
 
-func (d *SeaweedFSLogDriver) Flush() (err error) {
+func (d *SeaweedFsLogDriver) Flush() (err error) {
 	// skip if no data in buffer
 	if d.buffer.Len() == 0 {
 		return nil

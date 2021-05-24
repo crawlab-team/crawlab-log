@@ -7,16 +7,16 @@ import (
 	"time"
 )
 
-func setup(driver *SeaweedFSLogDriver) {
+func setup(driver *SeaweedFsLogDriver) {
 	_ = driver.m.DeleteDir(fmt.Sprintf("/%s/%s", driver.opts.BaseDir, driver.opts.Prefix))
 }
 
-func cleanup(driver *SeaweedFSLogDriver) {
+func cleanup(driver *SeaweedFsLogDriver) {
 	_ = driver.m.DeleteDir(fmt.Sprintf("/%s/%s", driver.opts.BaseDir, driver.opts.Prefix))
 }
 
 func TestNewSeaweedFSDriver(t *testing.T) {
-	_, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+	_, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 	})
@@ -24,7 +24,7 @@ func TestNewSeaweedFSDriver(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_Write(t *testing.T) {
-	driver, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+	driver, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 	})
@@ -83,7 +83,7 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
-	driver, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+	driver, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 	})
@@ -114,7 +114,7 @@ func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_Find(t *testing.T) {
-	driver, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+	driver, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 	})
@@ -183,7 +183,7 @@ func TestSeaweedFSLogDriver_Find(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_GetMetadata(t *testing.T) {
-	driver, err := NewSeaweedFSLogDriver(&SeaweedFSLogDriverOptions{
+	driver, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 		Size:    1000,

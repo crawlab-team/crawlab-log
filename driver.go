@@ -4,13 +4,13 @@ func NewLogDriver(logDriverType string, options interface{}) (driver Driver, err
 	switch logDriverType {
 	case DriverTypeFs:
 		if options == nil {
-			options = &SeaweedFSLogDriverOptions{}
+			options = &SeaweedFsLogDriverOptions{}
 		}
-		options, ok := options.(*SeaweedFSLogDriverOptions)
+		options, ok := options.(*SeaweedFsLogDriverOptions)
 		if !ok {
 			return driver, ErrInvalidType
 		}
-		driver, err = NewSeaweedFSLogDriver(options)
+		driver, err = NewSeaweedFsLogDriver(options)
 		if err != nil {
 			return driver, err
 		}
