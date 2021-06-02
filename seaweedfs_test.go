@@ -24,11 +24,12 @@ func TestNewSeaweedFSDriver(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_Write(t *testing.T) {
-	driver, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
+	d, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 	})
 	require.Nil(t, err)
+	driver := d.(*SeaweedFsLogDriver)
 
 	setup(driver)
 
@@ -83,11 +84,12 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
-	driver, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
+	d, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 	})
 	require.Nil(t, err)
+	driver := d.(*SeaweedFsLogDriver)
 
 	setup(driver)
 
@@ -114,11 +116,12 @@ func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_Find(t *testing.T) {
-	driver, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
+	d, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 	})
 	require.Nil(t, err)
+	driver := d.(*SeaweedFsLogDriver)
 
 	setup(driver)
 
@@ -183,12 +186,13 @@ func TestSeaweedFSLogDriver_Find(t *testing.T) {
 }
 
 func TestSeaweedFSLogDriver_GetMetadata(t *testing.T) {
-	driver, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
+	d, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
 		BaseDir: "logs",
 		Prefix:  "test",
 		Size:    1000,
 	})
 	require.Nil(t, err)
+	driver := d.(*SeaweedFsLogDriver)
 
 	setup(driver)
 

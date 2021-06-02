@@ -23,6 +23,7 @@ type SeaweedFsLogDriver struct {
 	opts *SeaweedFsLogDriverOptions // options
 
 	// internals
+	total     int64        // total lines
 	count     int64        // internal count of lines logged
 	buffer    bytes.Buffer // buffer of log lines written
 	m         fs.Manager   // SeaweedFSManager instance
@@ -41,7 +42,7 @@ type SeaweedFsLogDriverOptions struct {
 	MetadataName     string // metadata file name, set to "metadata.json"
 }
 
-func NewSeaweedFsLogDriver(options *SeaweedFsLogDriverOptions) (driver *SeaweedFsLogDriver, err error) {
+func NewSeaweedFsLogDriver(options *SeaweedFsLogDriverOptions) (driver Driver, err error) {
 	// normalize BaseDir
 	baseDir := options.BaseDir
 	if baseDir == "" {
@@ -117,12 +118,22 @@ func (d *SeaweedFsLogDriver) Init() (err error) {
 	// flush handler
 	go func() {
 		for {
+			time.Sleep(time.Duration(d.opts.FlushWaitSeconds) * time.Second)
 			d.flushLock.Lock()
 			_ = d.Flush()
 			d.flushLock.Unlock()
-			time.Sleep(time.Duration(d.opts.FlushWaitSeconds) * time.Second)
 		}
 	}()
+
+	// get initial metadata
+	go func() {
+		metadata, err := d.GetMetadata()
+		if err != nil {
+			return
+		}
+		d.total = metadata.TotalLines
+	}()
+
 	return nil
 }
 
@@ -144,6 +155,9 @@ func (d *SeaweedFsLogDriver) WriteLine(line string) (err error) {
 		return err
 	}
 	d.count++
+
+	// increment total lines
+	d.total++
 
 	// unlock
 	d.writeLock.Unlock()
@@ -195,7 +209,11 @@ func (d *SeaweedFsLogDriver) Find(pattern string, skip, limit int) (lines []stri
 }
 
 func (d *SeaweedFsLogDriver) Count(pattern string) (count int, err error) {
-	return count, nil
+	metadata, err := d.GetMetadata()
+	if err != nil {
+		return count, err
+	}
+	return int(metadata.TotalLines), nil
 }
 
 func (d *SeaweedFsLogDriver) GetLastLogFilePage() (page int64, err error) {
@@ -278,6 +296,7 @@ func (d *SeaweedFsLogDriver) UpdateMetadata() (err error) {
 	}
 	metadata := Metadata{
 		Size:       d.opts.Size,
+		TotalLines: d.total,
 		TotalBytes: totalBytes,
 		Md5:        md5sum,
 	}
