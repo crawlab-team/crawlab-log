@@ -3,6 +3,8 @@ package log
 import (
 	"fmt"
 	"github.com/stretchr/testify/require"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -54,7 +56,7 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 
 	data, err := driver.m.GetFile("/logs/test/00000000")
 	require.Nil(t, err)
-	require.Equal(t, content0, string(data))
+	require.Equal(t, strings.Trim(content0, "\n"), string(data))
 
 	ok, err = driver.m.Exists("/logs/test/00000001")
 	require.Nil(t, err)
@@ -62,7 +64,7 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 
 	data, err = driver.m.GetFile("/logs/test/00000001")
 	require.Nil(t, err)
-	require.Equal(t, content1, string(data))
+	require.Equal(t, strings.Trim(content1, "\n"), string(data))
 
 	files, err := driver.GetLogFiles()
 	require.Nil(t, err)
@@ -103,7 +105,8 @@ func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
 		err = driver.WriteLines(lines)
 		require.Nil(t, err)
 		lines = []string{}
-		time.Sleep(1 * time.Second)
+		//time.Sleep(1 * time.Second)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	time.Sleep(5 * time.Second)
@@ -111,6 +114,46 @@ func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
 	files, err := driver.GetLogFiles()
 	require.Nil(t, err)
 	require.Equal(t, 10*batch/1000, len(files))
+
+	cleanup(driver)
+}
+
+func TestSeaweedFSLogDriver_WriteLines_Parallel(t *testing.T) {
+	d, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
+		BaseDir: "logs",
+		Prefix:  "test",
+	})
+	require.Nil(t, err)
+	driver := d.(*SeaweedFsLogDriver)
+
+	setup(driver)
+
+	n := 5
+	wg := sync.WaitGroup{}
+	wg.Add(n)
+
+	batch := 500
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			for k := 0; k < 10; k++ {
+				var lines []string
+				for j := 0; j < batch; j++ {
+					line := fmt.Sprintf("[%d] line: %d", i, k*batch+j+1)
+					lines = append(lines, line)
+				}
+				err = driver.WriteLines(lines)
+				time.Sleep(50 * time.Millisecond)
+			}
+			wg.Done()
+		}(i)
+	}
+	wg.Wait()
+
+	time.Sleep(5 * time.Second)
+
+	files, err := driver.GetLogFiles()
+	require.Nil(t, err)
+	require.Equal(t, 10*n*batch/1000, len(files))
 
 	cleanup(driver)
 }

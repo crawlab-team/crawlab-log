@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	fs "github.com/crawlab-team/crawlab-fs"
+	"github.com/crawlab-team/go-trace"
 	"github.com/crawlab-team/goseaweedfs"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -190,8 +192,8 @@ func (d *SeaweedFsLogDriver) Find(pattern string, skip, limit int) (lines []stri
 		if err != nil {
 			return lines, err
 		}
-		dataLines := strings.Split(string(data), "\n")
-		dataLines = dataLines[:(len(dataLines) - 1)]
+		text := string(data)
+		dataLines := strings.Split(text, "\n")
 		for j, line := range dataLines {
 			if i == 0 && j < (skip%int(d.opts.Size)) {
 				continue
@@ -239,10 +241,18 @@ func (d *SeaweedFsLogDriver) GetLastLogFilePage() (page int64, err error) {
 }
 
 func (d *SeaweedFsLogDriver) GetLastFilePath() (filePath string, err error) {
+	// attempt to get page number
 	page, err := d.GetLastLogFilePage()
 	if err != nil {
 		return filePath, err
 	}
+
+	// no file exists
+	if page == -1 {
+		return filePath, nil
+	}
+
+	// file path
 	filePath = d.GetFilePathByPage(page)
 	return
 }
@@ -339,86 +349,74 @@ func (d *SeaweedFsLogDriver) Flush() (err error) {
 	if d.buffer.Len() == 0 {
 		return nil
 	}
-	//fmt.Println(fmt.Sprintf("flushing: %d lines", len(strings.Split(d.buffer.String(), "\n"))-1))
 
-	// get remote file path
-	filePath, err := d.GetLastFilePath()
+	// log lines
+	var logLines []string
+
+	// last page
+	lastPage, err := d.GetLastLogFilePage()
 	if err != nil {
 		return err
 	}
 
-	// check if it exists
-	ok, err := d.m.Exists(filePath)
-	if err != nil {
-		return err
-	}
+	// last file exists
+	if lastPage > -1 {
+		// last file path
+		lastFilePath := d.GetFilePathByPage(lastPage)
 
-	// update log files
-	i := int64(0)
-	text := ""
-	increment := false
-	if ok {
-		data, err := d.m.GetFile(filePath)
+		// last file data
+		lastFileData, err := d.m.GetFile(lastFilePath)
 		if err != nil {
+			return trace.TraceError(err)
+		}
+
+		// append to log lines
+		logLines = strings.Split(string(lastFileData), "\n")
+	}
+
+	// append buffer to log lines
+	for _, line := range strings.Split(d.buffer.String(), "\n") {
+		logLines = append(logLines, line)
+	}
+
+	// start page
+	startPage := lastPage
+	if startPage == -1 {
+		startPage = 0
+	}
+
+	// end page
+	endPage := startPage + int64(math.Ceil(float64(len(logLines))/float64(d.opts.Size)))
+
+	i := 0
+	for page := startPage; page < endPage; page++ {
+		// size
+		size := int(d.opts.Size)
+
+		// start and end indexes
+		start := i * size
+		end := start + size
+		if end > len(logLines) {
+			end = len(logLines)
+		}
+
+		// data
+		data := []byte(strings.Join(logLines[start:end], "\n"))
+
+		// skip if data is empty
+		if len(data) == 0 {
+			continue
+		}
+
+		// file path
+		filePath := d.GetFilePathByPage(page)
+
+		// write to fs
+		if err := d.m.UpdateFile(filePath, data); err != nil {
 			return err
 		}
 
-		// lines count of last file
-		dataLines := strings.Split(string(data), "\n")
-		dataLines = dataLines[:(len(dataLines) - 1)]
-		for _, line := range dataLines {
-			text += line + "\n"
-			i++
-		}
-
-		// If total lines count of last file equals to size,
-		// which means it's not an incremental update,
-		// and set text to empty and increment flag to false.
-		// Otherwise, keep text and set increment flag to true.
-		if len(dataLines) < int(d.opts.Size) {
-			increment = true
-		} else {
-			text = ""
-		}
-	}
-	bufferLines := strings.Split(d.buffer.String(), "\n")
-	bufferLines = bufferLines[:(len(bufferLines) - 1)]
-	for _, line := range bufferLines {
-		text += line + "\n"
 		i++
-		if (i % d.opts.Size) == 0 {
-			page, err := d.GetLastLogFilePage()
-			if err != nil {
-				return err
-			}
-			page += 1
-			if increment {
-				page -= 1
-				increment = false
-			}
-			filePath = d.GetFilePathByPage(page)
-			fmt.Println(fmt.Sprintf("text: %s", text))
-			if err := d.m.UpdateFile(filePath, []byte(text)); err != nil {
-				return err
-			}
-			text = ""
-		}
-	}
-	if text != "" {
-		page, err := d.GetLastLogFilePage()
-		if err != nil {
-			return err
-		}
-		page += 1
-		if increment {
-			page -= 1
-			increment = false
-		}
-		filePath = d.GetFilePathByPage(page)
-		//fmt.Println(fmt.Sprintf("text: %s", text))
-		if err := d.m.UpdateFile(filePath, []byte(text)); err != nil {
-			return err
-		}
 	}
 
 	// reset buffer
@@ -429,6 +427,5 @@ func (d *SeaweedFsLogDriver) Flush() (err error) {
 		return err
 	}
 
-	//fmt.Println(fmt.Sprintf("reset buffer: %d lines", len(strings.Split(d.buffer.String(), "\n"))-1))
 	return nil
 }

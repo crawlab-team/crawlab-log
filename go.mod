@@ -9,6 +9,7 @@ replace (
 
 require (
 	github.com/crawlab-team/crawlab-fs v0.0.0
+	github.com/crawlab-team/go-trace v0.1.0
 	github.com/crawlab-team/goseaweedfs v0.1.6
 	github.com/stretchr/testify v1.6.1
 )
