@@ -3,6 +3,7 @@ package log
 import (
 	"fmt"
 	"github.com/stretchr/testify/require"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -48,7 +49,7 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 		}
 	}
 
-	time.Sleep(4 * time.Second)
+	time.Sleep(6 * time.Second)
 
 	ok, err := driver.m.Exists("/logs/test/00000000")
 	require.Nil(t, err)
@@ -76,7 +77,7 @@ func TestSeaweedFSLogDriver_Write(t *testing.T) {
 		require.Nil(t, err)
 	}
 
-	time.Sleep(4 * time.Second)
+	time.Sleep(6 * time.Second)
 
 	files, err = driver.GetLogFiles()
 	require.Nil(t, err)
@@ -109,7 +110,7 @@ func TestSeaweedFSLogDriver_WriteLines(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(8 * time.Second)
 
 	files, err := driver.GetLogFiles()
 	require.Nil(t, err)
@@ -149,7 +150,7 @@ func TestSeaweedFSLogDriver_WriteLines_Parallel(t *testing.T) {
 	}
 	wg.Wait()
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(8 * time.Second)
 
 	files, err := driver.GetLogFiles()
 	require.Nil(t, err)
@@ -259,4 +260,37 @@ func TestSeaweedFSLogDriver_GetMetadata(t *testing.T) {
 	require.NotEmpty(t, data.Md5)
 
 	cleanup(driver)
+}
+
+func TestSeaweedFSLogDriver_LargeLogLine(t *testing.T) {
+	d, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
+		BaseDir: "logs",
+		Prefix:  "test",
+	})
+	require.Nil(t, err)
+	driver := d.(*SeaweedFsLogDriver)
+
+	setup(driver)
+
+	length := 10000
+	bufSize := 4096
+
+	line := strings.Repeat("a", length)
+	lineBytes := []byte(line)
+	require.Greater(t, len(lineBytes), bufSize)
+
+	// write line
+	err = driver.WriteLine(line)
+	require.Nil(t, err)
+	err = driver.Flush()
+
+	time.Sleep(3 * time.Second)
+
+	// test get log lines
+	ok, err := driver.m.Exists("/logs/test/00000000")
+	require.Nil(t, err)
+	require.True(t, ok)
+	lines, err := driver.Find("", 0, 1000)
+	require.Nil(t, err)
+	require.Equal(t, int(math.Ceil(float64(length)/float64(bufSize)))+1, len(lines))
 }

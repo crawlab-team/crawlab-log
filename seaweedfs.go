@@ -10,6 +10,7 @@ import (
 	fs "github.com/crawlab-team/crawlab-fs"
 	"github.com/crawlab-team/go-trace"
 	"github.com/crawlab-team/goseaweedfs"
+	"github.com/spf13/viper"
 	"math"
 	"strconv"
 	"strings"
@@ -25,14 +26,14 @@ type SeaweedFsLogDriver struct {
 	opts *SeaweedFsLogDriverOptions // options
 
 	// internals
-	total     int64        // total lines
-	count     int64        // internal count of lines logged
-	buffer    bytes.Buffer // buffer of log lines written
-	m         fs.Manager   // SeaweedFSManager instance
-	writeLock *sync.Mutex  // write lock
-	flushLock *sync.Mutex  // flush lock
-	ch        chan string  // channel
-	flushing  bool         // whether the log driver is flushing
+	total     int64         // total lines
+	count     int64         // internal count of lines logged
+	buf       *bytes.Buffer // buffer of log lines written
+	m         fs.Manager    // SeaweedFSManager instance
+	writeLock *sync.Mutex   // write lock
+	flushLock *sync.Mutex   // flush lock
+	ch        chan string   // channel
+	flushing  bool          // whether the log driver is flushing
 }
 
 type SeaweedFsLogDriverOptions struct {
@@ -40,80 +41,9 @@ type SeaweedFsLogDriverOptions struct {
 	Prefix           string // directory prefix, default: "test"
 	Size             int64  // number of lines per log chunk file, default: 1000
 	Padding          int64  // log file name padding, default: 8
-	FlushWaitSeconds int64  // wait time to flush buffer, default: 3
+	FlushWaitSeconds int64  // wait time to flush buf, default: 3
 	MetadataName     string // metadata file name, set to "metadata.json"
-}
-
-func NewSeaweedFsLogDriver(options *SeaweedFsLogDriverOptions) (driver Driver, err error) {
-	// normalize BaseDir
-	baseDir := options.BaseDir
-	if baseDir == "" {
-		baseDir = "logs"
-	}
-	if strings.HasPrefix(baseDir, "/") {
-		baseDir = baseDir[1:]
-	}
-	if strings.HasSuffix(baseDir, "/") {
-		baseDir = baseDir[:(len(baseDir) - 1)]
-	}
-	options.BaseDir = baseDir
-
-	// normalize Prefix
-	prefix := options.Prefix
-	if prefix == "" {
-		prefix = "test"
-	}
-	if strings.HasPrefix(prefix, "/") {
-		prefix = prefix[1:]
-	}
-	if strings.HasSuffix(prefix, "/") {
-		prefix = prefix[:(len(prefix) - 1)]
-	}
-	options.Prefix = prefix
-
-	// normalize Size
-	size := options.Size
-	if size == 0 {
-		size = 1000
-	}
-	options.Size = size
-
-	// normalize padding
-	padding := options.Padding
-	if padding == 0 {
-		padding = 8
-	}
-	options.Padding = padding
-
-	// normalize FlushWaitSeconds
-	flushWaitSeconds := options.FlushWaitSeconds
-	if flushWaitSeconds == 0 {
-		flushWaitSeconds = 3
-	}
-	options.FlushWaitSeconds = flushWaitSeconds
-
-	// fs manager
-	manager, err := fs.NewSeaweedFsManager()
-	if err != nil {
-		return driver, err
-	}
-
-	// driver
-	driver = &SeaweedFsLogDriver{
-		opts:      options,
-		count:     0,
-		m:         manager,
-		writeLock: &sync.Mutex{},
-		flushLock: &sync.Mutex{},
-		ch:        make(chan string),
-	}
-
-	// init driver
-	if err := driver.Init(); err != nil {
-		return driver, err
-	}
-
-	return
+	BufferSize       int64  // buffer size, default: 4096 (4KB)
 }
 
 func (d *SeaweedFsLogDriver) Init() (err error) {
@@ -147,22 +77,53 @@ func (d *SeaweedFsLogDriver) Close() (err error) {
 }
 
 func (d *SeaweedFsLogDriver) WriteLine(line string) (err error) {
+	// line bytes
+	lineBytes := []byte(line + "\n")
+
+	// split and write if line bytes exceed buffer size
+	if len(lineBytes) > int(d.opts.BufferSize) {
+		for i := 0; i < len(lineBytes); i += int(d.opts.BufferSize) {
+			var subLineBytes []byte
+			if i+int(d.opts.BufferSize) > len(lineBytes) {
+				subLineBytes = lineBytes[i:]
+			} else {
+				subLineBytes = lineBytes[i:(i + int(d.opts.BufferSize) - 1)]
+			}
+			subLine := string(subLineBytes)
+			if err := d.WriteLine(subLine); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// flush if size exceeds
+	if d.buf.Len()+len(lineBytes) > int(d.opts.BufferSize) {
+		d.flushLock.Lock()
+		err := d.Flush()
+		d.flushLock.Unlock()
+		if err != nil {
+			return err
+		}
+	}
+
 	// lock
 	d.writeLock.Lock()
 
-	// write log line to buffer
-	_, err = d.buffer.WriteString(line + "\n")
-	//fmt.Println(fmt.Sprintf("written: %s", line))
+	// unlock (deferred)
+	defer d.writeLock.Unlock()
+
+	// write log line to buf
+	_, err = d.buf.Write(lineBytes)
 	if err != nil {
 		return err
 	}
+
+	// increment count
 	d.count++
 
 	// increment total lines
 	d.total++
-
-	// unlock
-	d.writeLock.Unlock()
 
 	return nil
 }
@@ -345,10 +306,19 @@ func (d *SeaweedFsLogDriver) getMd5(files []goseaweedfs.FilerFileInfo) (md5sum s
 }
 
 func (d *SeaweedFsLogDriver) Flush() (err error) {
-	// skip if no data in buffer
-	if d.buffer.Len() == 0 {
+	// skip if buffer string is empty
+	if d.buf.Len() == 0 {
 		return nil
 	}
+
+	// buffer string
+	bufString := d.buf.String()
+
+	// reset buffer
+	d.buf.Reset()
+
+	// reset count
+	d.count = 0
 
 	// log lines
 	var logLines []string
@@ -374,8 +344,9 @@ func (d *SeaweedFsLogDriver) Flush() (err error) {
 		logLines = strings.Split(string(lastFileData), "\n")
 	}
 
-	// append buffer to log lines
-	for _, line := range strings.Split(d.buffer.String(), "\n") {
+	// append buf to log lines
+	bufferLogLines := strings.Split(bufString, "\n")
+	for _, line := range bufferLogLines[:len(bufferLogLines)-1] {
 		logLines = append(logLines, line)
 	}
 
@@ -419,13 +390,96 @@ func (d *SeaweedFsLogDriver) Flush() (err error) {
 		i++
 	}
 
-	// reset buffer
-	d.buffer.Reset()
-
 	// update metadata
 	if err := d.UpdateMetadata(); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func NewSeaweedFsLogDriver(options *SeaweedFsLogDriverOptions) (driver Driver, err error) {
+	// normalize BaseDir
+	baseDir := options.BaseDir
+	if baseDir == "" {
+		baseDir = "logs"
+	}
+	if strings.HasPrefix(baseDir, "/") {
+		baseDir = baseDir[1:]
+	}
+	if strings.HasSuffix(baseDir, "/") {
+		baseDir = baseDir[:(len(baseDir) - 1)]
+	}
+	options.BaseDir = baseDir
+
+	// normalize Prefix
+	prefix := options.Prefix
+	if prefix == "" {
+		prefix = "test"
+	}
+	if strings.HasPrefix(prefix, "/") {
+		prefix = prefix[1:]
+	}
+	if strings.HasSuffix(prefix, "/") {
+		prefix = prefix[:(len(prefix) - 1)]
+	}
+	options.Prefix = prefix
+
+	// normalize Size
+	size := options.Size
+	if size == 0 {
+		size = 1000
+	}
+	options.Size = size
+
+	// normalize padding
+	padding := options.Padding
+	if padding == 0 {
+		padding = 8
+	}
+	options.Padding = padding
+
+	// normalize FlushWaitSeconds
+	flushWaitSeconds := options.FlushWaitSeconds
+	if flushWaitSeconds == 0 {
+		flushWaitSeconds = 3
+	}
+	options.FlushWaitSeconds = flushWaitSeconds
+
+	// normalize buffer size
+	bufferSize := options.BufferSize
+	if bufferSize == 0 {
+		bufferSize = viper.GetInt64("log.driver.seaweedfs.bufferSize")
+	}
+	if bufferSize == 0 {
+		bufferSize = 64 * 1024
+	}
+	options.BufferSize = bufferSize
+
+	// fs manager
+	manager, err := fs.NewSeaweedFsManager()
+	if err != nil {
+		return driver, err
+	}
+
+	// buffer
+	buf := bytes.NewBuffer(make([]byte, 0, options.BufferSize))
+
+	// driver
+	driver = &SeaweedFsLogDriver{
+		opts:      options,
+		count:     0,
+		m:         manager,
+		buf:       buf,
+		writeLock: &sync.Mutex{},
+		flushLock: &sync.Mutex{},
+		ch:        make(chan string),
+	}
+
+	// init driver
+	if err := driver.Init(); err != nil {
+		return driver, err
+	}
+
+	return
 }
