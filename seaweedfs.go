@@ -44,6 +44,7 @@ type SeaweedFsLogDriverOptions struct {
 	FlushWaitSeconds int64  // wait time to flush buf, default: 3
 	MetadataName     string // metadata file name, set to "metadata.json"
 	BufferSize       int64  // buffer size, default: 4096 (4KB)
+	Ttl              string // ttl time-to-live, default: 30d
 }
 
 func (d *SeaweedFsLogDriver) Init() (err error) {
@@ -383,7 +384,7 @@ func (d *SeaweedFsLogDriver) Flush() (err error) {
 		filePath := d.GetFilePathByPage(page)
 
 		// write to fs
-		if err := d.m.UpdateFile(filePath, data); err != nil {
+		if err := d.m.UpdateFile(filePath, data, "", d.opts.Ttl); err != nil {
 			return err
 		}
 
@@ -455,6 +456,16 @@ func NewSeaweedFsLogDriver(options *SeaweedFsLogDriverOptions) (driver Driver, e
 		bufferSize = 64 * 1024
 	}
 	options.BufferSize = bufferSize
+
+	// normalize ttl
+	ttl := options.Ttl
+	if ttl == "" {
+		ttl = viper.GetString("log.driver.seaweedfs.ttl")
+	}
+	if ttl == "" {
+		ttl = "30d"
+	}
+	options.Ttl = ttl
 
 	// fs manager
 	manager, err := fs.NewSeaweedFsManager()

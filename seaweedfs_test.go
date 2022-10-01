@@ -294,3 +294,30 @@ func TestSeaweedFSLogDriver_LargeLogLine(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, int(math.Ceil(float64(length)/float64(bufSize)))+1, len(lines))
 }
+
+func TestSeaweedFsLogDriver_Ttl(t *testing.T) {
+	d, err := NewSeaweedFsLogDriver(&SeaweedFsLogDriverOptions{
+		BaseDir: "logs",
+		Prefix:  "test",
+		Ttl:     "1m",
+	})
+	require.Nil(t, err)
+	driver := d.(*SeaweedFsLogDriver)
+
+	setup(driver)
+
+	// write line
+	err = driver.WriteLine("test line")
+	require.Nil(t, err)
+	err = driver.Flush()
+
+	time.Sleep(3 * time.Second)
+	ok, err := driver.m.Exists("/logs/test/00000000")
+	require.Nil(t, err)
+	require.True(t, ok)
+
+	// validate
+	time.Sleep(1 * time.Minute)
+	ok, _ = driver.m.Exists("/logs/test/00000000")
+	require.False(t, ok)
+}
